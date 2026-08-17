@@ -1,0 +1,12 @@
+[package]
+name = "bridge-service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+airplay-backend = { path = "../airplay-backend" }
+audio-windows = { path = "../audio-windows" }
+bridge-core = { path = "../bridge-core" }
+tokio.workspace = true

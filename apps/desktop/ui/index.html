@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HomePod Bridge</title>
+  <style>
+    :root{font-family:Segoe UI,system-ui,sans-serif;color:#111827;background:#f4f6f9}
+    *{box-sizing:border-box}body{margin:0;padding:26px}.card{background:#fff;border-radius:20px;padding:20px;box-shadow:0 10px 28px #00000010;margin-bottom:14px}
+    h1{font-size:26px;margin:0 0 6px}.sub{color:#6b7280;font-size:13px}.status{display:flex;align-items:center;gap:8px;margin-top:16px}.dot{width:10px;height:10px;border-radius:50%;background:#9ca3af}.dot.on{background:#10b981}.dot.busy{background:#f59e0b}
+    button{border:0;border-radius:12px;padding:11px 15px;font-weight:600;cursor:pointer}.primary{background:#111827;color:white;width:100%;font-size:15px}.secondary{background:#eef2f7}.row{display:flex;justify-content:space-between;align-items:center;gap:12px}.device{padding:13px;border:1px solid #e5e7eb;border-radius:14px;margin-top:10px;cursor:pointer}.device.selected{border:2px solid #111827}.badge{font-size:12px;background:#eef2ff;padding:5px 8px;border-radius:999px}.warn{font-size:12px;color:#92400e;background:#fffbeb;padding:10px 12px;border-radius:12px;margin-top:12px}select,input{padding:9px;border:1px solid #d1d5db;border-radius:10px}.empty{padding:18px 4px;color:#6b7280;text-align:center}.error{display:none;color:#b91c1c;background:#fef2f2;border-radius:12px;padding:10px 12px;margin-top:10px;font-size:12px}.error.show{display:block}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>HomePod Bridge</h1>
+    <div class="sub">Windows 系统音频 → HomePod / HomePod 立体声对</div>
+    <div class="status"><span id="dot" class="dot"></span><span id="statusText">未连接</span></div>
+    <div id="error" class="error"></div>
+  </div>
+
+  <div class="card">
+    <div class="row"><strong>AirPlay 2 设备</strong><button id="scan" class="secondary">重新扫描</button></div>
+    <div id="devices"><div class="empty">点击“重新扫描”寻找同一局域网内的 HomePod</div></div>
+  </div>
+
+  <div class="card">
+    <div class="row"><strong>延迟模式</strong>
+      <select id="latency">
+        <option value="ultra">极速 · 250 ms 协议缓冲下限目标</option>
+        <option value="low">低延迟 · 500 ms</option>
+        <option value="stable">稳定 · 1000 ms</option>
+      </select>
+    </div>
+    <div class="warn">250 ms 是 AirPlay 会话协商的接收缓冲下限目标，不是“最终延迟保证”。HomePod 仍可能选择更大的实际缓冲；极速模式默认启用。</div>
+  </div>
+
+  <div class="card"><div class="row"><strong>HomePod 音量</strong><span id="volumeText">35%</span></div><input id="volume" style="width:100%;margin-top:10px" type="range" min="0" max="100" value="35" /></div>
+  <button class="primary" id="connect">连接 HomePod</button>
+
+<script>
+const invoke = window.__TAURI__.core.invoke;
+const devicesEl = document.getElementById('devices');
+const scanBtn = document.getElementById('scan');
+const connectBtn = document.getElementById('connect');
+const volume = document.getElementById('volume');
+const volumeText = document.getElementById('volumeText');
+const latency = document.getElementById('latency');
+const dot = document.getElementById('dot');
+const statusText = document.getElementById('statusText');
+const errorEl = document.getElementById('error');
+let devices = [];
+let selected = null;
+let connected = false;
+
+function showError(message='') {
+  errorEl.textContent = message;
+  errorEl.classList.toggle('show', Boolean(message));
+}
+function setStatus(text, mode='off') {
+  statusText.textContent = text;
+  dot.className = 'dot' + (mode === 'on' ? ' on' : mode === 'busy' ? ' busy' : '');
+}
+function renderDevices() {
+  if (!devices.length) {
+    devicesEl.innerHTML = '<div class="empty">没有发现 HomePod。请确认电脑和 HomePod 在同一局域网。</div>';
+    return;
+  }
+  devicesEl.innerHTML = '';
+  devices.forEach((d, i) => {
+    const el = document.createElement('div');
+    el.className = 'device' + (selected === i ? ' selected' : '');
+    const model = d.model ? ` · ${d.model}` : '';
+    el.innerHTML = `<div class="row"><div><strong>${escapeHtml(d.name)}</strong><div class="sub">${escapeHtml(d.address)}:${d.port}${escapeHtml(model)}</div></div><span class="badge">AirPlay 2</span></div>`;
+    el.onclick = () => { selected = i; renderDevices(); };
+    devicesEl.appendChild(el);
+  });
+}
+function escapeHtml(value) {
+  return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+}
+
+scanBtn.onclick = async () => {
+  showError(); setStatus('正在扫描 HomePod…', 'busy'); scanBtn.disabled = true;
+  try {
+    devices = await invoke("scan_devices");
+    selected = devices.length ? 0 : null;
+    renderDevices();
+    setStatus(connected ? '已连接' : `发现 ${devices.length} 个 HomePod`, connected ? 'on' : 'off');
+  } catch (e) { showError(String(e)); setStatus('扫描失败'); }
+  finally { scanBtn.disabled = false; }
+};
+
+connectBtn.onclick = async () => {
+  showError();
+  if (connected) {
+    setStatus('正在断开…', 'busy');
+    try {
+      await invoke("disconnect_device");
+      connected = false; connectBtn.textContent = '连接 HomePod'; setStatus('未连接');
+    } catch (e) { showError(String(e)); }
+    return;
+  }
+  if (selected == null || !devices[selected]) { showError('请先扫描并选择一个 HomePod。'); return; }
+  setStatus('正在连接 HomePod…', 'busy'); connectBtn.disabled = true;
+  try {
+    await invoke("connect_device", {
+      receiver: devices[selected],
+      volume: Number(volume.value) / 100,
+      profile: latency.value
+    });
+    connected = true; connectBtn.textContent = '断开 HomePod'; setStatus(`已连接 · ${devices[selected].name}`, 'on');
+  } catch (e) { showError(String(e)); setStatus('连接失败'); }
+  finally { connectBtn.disabled = false; }
+};
+
+volume.oninput = () => { volumeText.textContent = `${volume.value}%`; };
+volume.onchange = async () => {
+  if (!connected) return;
+  try { await invoke("set_volume", { volume: Number(volume.value) / 100 }); }
+  catch (e) { showError(String(e)); }
+};
+
+async function refreshBridgeState() {
+  try {
+    const state = await invoke("bridge_status");
+    if (state.kind === 'streaming') {
+      connected = true;
+      connectBtn.textContent = '断开 HomePod';
+      const target = devices.find(d => d.id === state.receiver_id);
+      const name = target ? target.name : 'HomePod';
+      setStatus(`已连接 · ${name} · ${state.profile}`, 'on');
+    } else if (state.kind === 'reconnecting') {
+      connected = true;
+      connectBtn.textContent = '断开 HomePod';
+      setStatus(`正在自动重连 · 第 ${state.attempt} 次 · ${state.profile}`, 'busy');
+    } else if (state.kind === 'idle' && connected) {
+      connected = false;
+      connectBtn.textContent = '连接 HomePod';
+      setStatus('未连接');
+    } else if (state.kind === 'error') {
+      showError(state.message || 'HomePod Bridge 出现错误');
+    }
+  } catch (_) {
+    // Startup/exit races are transient; command errors are surfaced by the
+    // explicit connect/scan actions instead of spamming the user every second.
+  }
+}
+
+setInterval(refreshBridgeState, 1000);
+scanBtn.click();
+</script>
+</body>
+</html>

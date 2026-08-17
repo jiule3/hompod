@@ -1,0 +1,17 @@
+[package]
+name = "airplay-backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["airsend"]
+airsend = ["dep:cap-core"]
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+bridge-core = { path = "../bridge-core" }
+serde.workspace = true
+tokio.workspace = true
+cap-core = { git = "https://github.com/Pabldi08/AirSend", rev = "07975d74ab6fd2b6150a93d5b655ebb482dab0ea", optional = true }

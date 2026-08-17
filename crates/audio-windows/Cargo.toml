@@ -1,0 +1,21 @@
+[package]
+name = "audio-windows"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+tokio.workspace = true
+crossbeam-channel = "0.5"
+audio-capture = { git = "https://github.com/Pabldi08/AirSend", rev = "07975d74ab6fd2b6150a93d5b655ebb482dab0ea" }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_Media_Audio",
+  "Win32_Media_Audio_Endpoints",
+  "Win32_System_Com"
+] }
