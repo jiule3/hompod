@@ -8,13 +8,13 @@ use audio_windows::{AirSendLoopbackFactory, SystemMuteRouter};
 use bridge_core::{BridgeState, LatencyProfile, Receiver};
 use bridge_service::BridgeService;
 use tauri::{Manager, RunEvent, State};
-use tokio::{sync::Mutex, task::JoinHandle};
+use tokio::sync::Mutex;
 
 type Service = BridgeService<AirSendBackend, SystemMuteRouter, AirSendLoopbackFactory>;
 
 struct PumpControl {
     stop: Arc<AtomicBool>,
-    task: JoinHandle<()>,
+    task: tauri::async_runtime::JoinHandle<()>,
 }
 
 struct DesktopState {
