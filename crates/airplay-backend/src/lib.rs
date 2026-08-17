@@ -21,15 +21,6 @@ pub trait AirPlayBackend: Send + Sync {
     async fn open(&self, receiver: &Receiver, config: StreamConfig) -> Result<Box<dyn AirPlayStream>>;
 }
 
-#[cfg(feature = "airsend")]
-pub fn upstream_latency(profile: LatencyProfile) -> cap_core::streaming::LatencyProfile {
-    match profile {
-        LatencyProfile::Ultra => cap_core::streaming::LatencyProfile::Gaming,
-        LatencyProfile::Low => cap_core::streaming::LatencyProfile::Video,
-        LatencyProfile::Stable => cap_core::streaming::LatencyProfile::Music,
-    }
-}
-
 /// Real HomePod backend built on the AirSend transport that is already known to
 /// pair with HomePod and send realtime ALAC over AirPlay 2 on Windows.
 #[cfg(feature = "airsend")]
@@ -95,10 +86,14 @@ impl AirPlayBackend for AirSendBackend {
             model: receiver.model.clone(),
             features: None,
         };
+        // The pinned AirSend API fixes its receiver latency internally and
+        // currently accepts only descriptor + initial volume.  Keep the
+        // profile in our public config so we can map it once the transport
+        // exposes a tunable latency API.
+        let _requested_profile = config.profile;
         let handle = cap_core::streaming::open_live_stream(
             descriptor,
             Some(config.volume.clamp(0.0, 1.0)),
-            Some(upstream_latency(config.profile)),
         )
         .await
         .map_err(|e| anyhow!("HomePod stream open failed: {e}"))?;
