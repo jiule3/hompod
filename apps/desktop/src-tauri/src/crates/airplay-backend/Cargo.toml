@@ -1,0 +1,20 @@
+[package]
+name = "airplay-backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["airsend"]
+airsend = ["dep:cap-core"]
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+bridge-core = { path = "../bridge-core" }
+serde.workspace = true
+tokio.workspace = true
+
+# AirSend 0.1.5-era core: exposes receiver latency profiles
+# Music ~500ms-3s, Video ~350ms-2s, Gaming ~250ms-1s.
+cap-core = { git = "https://github.com/Pabldi08/AirSend", rev = "ee55c8d5d2aa15959bd7e936a73fe9ff7d487758", optional = true }
