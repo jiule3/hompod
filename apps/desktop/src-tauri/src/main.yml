@@ -1,0 +1,112 @@
+name: Build HomePod Bridge EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Prepare patched low-latency AirPlay core
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $airSend = Join-Path $env:RUNNER_TEMP 'AirSend'
+          $airplay2 = Join-Path $env:RUNNER_TEMP 'airplay2-rs'
+
+          git clone --quiet https://github.com/Pabldi08/AirSend $airSend
+          git -C $airSend checkout --quiet ee55c8d5d2aa15959bd7e936a73fe9ff7d487758
+
+          git clone --quiet https://github.com/Pabldi08/airplay2-rs $airplay2
+          git -C $airplay2 checkout --quiet 1baeaae336ca3a9828e732500082f5fd1767d2fd
+
+          # Single-variable test:
+          # upstream fixed sender AudioBuffer is 2000 ms.
+          # Shrink ONLY that buffer to 250 ms.
+          $streamerPath = Join-Path $airplay2 'crates/airplay-audio/src/streamer.rs'
+          $streamer = Get-Content $streamerPath -Raw
+          $oldBuffer = 'buffer: AudioBuffer::new(audio_format, 2000),'
+          $newBuffer = 'buffer: AudioBuffer::new(audio_format, 250),'
+          if (-not $streamer.Contains($oldBuffer)) {
+            throw 'Expected 2000ms AudioBuffer line was not found.'
+          }
+          $streamer = $streamer.Replace($oldBuffer, $newBuffer)
+          Set-Content -Path $streamerPath -Value $streamer -Encoding utf8 -NoNewline
+
+          # Point the local AirSend core at the patched local airplay2-rs.
+          $capTomlPath = Join-Path $airSend 'crates/airplay-core/Cargo.toml'
+          $capToml = Get-Content $capTomlPath -Raw
+          $ap2 = $airplay2.Replace('\', '/')
+          $rev = '1baeaae336ca3a9828e732500082f5fd1767d2fd'
+          $gitUrl = 'https://github.com/Pabldi08/airplay2-rs'
+
+          $replacements = @{
+            "ap2rs-pairing = { package = `"airplay-pairing`", git = `"$gitUrl`", rev = `"$rev`" }" = "ap2rs-pairing = { package = `"airplay-pairing`", path = `"$ap2/crates/airplay-pairing`" }"
+            "ap2rs-core = { package = `"airplay-core`", git = `"$gitUrl`", rev = `"$rev`" }" = "ap2rs-core = { package = `"airplay-core`", path = `"$ap2/crates/airplay-core`" }"
+            "ap2rs-client = { package = `"airplay-client`", git = `"$gitUrl`", rev = `"$rev`" }" = "ap2rs-client = { package = `"airplay-client`", path = `"$ap2/crates/airplay-client`" }"
+            "ap2rs-audio = { package = `"airplay-audio`", git = `"$gitUrl`", rev = `"$rev`" }" = "ap2rs-audio = { package = `"airplay-audio`", path = `"$ap2/crates/airplay-audio`" }"
+          }
+
+          foreach ($old in $replacements.Keys) {
+            if (-not $capToml.Contains($old)) {
+              throw "Expected AirSend dependency line was not found: $old"
+            }
+            $capToml = $capToml.Replace($old, $replacements[$old])
+          }
+          Set-Content -Path $capTomlPath -Value $capToml -Encoding utf8 -NoNewline
+
+          # Override the git cap-core dependency with our patched local checkout.
+          $capPath = (Join-Path $airSend 'crates/airplay-core').Replace('\', '/')
+          Add-Content -Path 'Cargo.toml' -Encoding utf8 -Value "`n[patch.`"https://github.com/Pabldi08/AirSend`"]`ncap-core = { path = `"$capPath`" }`n"
+
+          Write-Host 'Low-latency patch applied:'
+          Select-String -Path $streamerPath -Pattern 'AudioBuffer::new'
+          Get-Content Cargo.toml | Select-Object -Last 4
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test --workspace
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Build HomePod Bridge
+        working-directory: apps/desktop/src-tauri
+        run: cargo tauri build
+
+      - name: Collect EXE
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          if (Test-Path "target\release\homepod-bridge-desktop.exe") {
+            Copy-Item "target\release\homepod-bridge-desktop.exe" "dist\HomePod-Bridge.exe"
+          }
+
+          Get-ChildItem "target\release\bundle\nsis\*.exe" -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName "dist\HomePod-Bridge-Setup.exe"
+          }
+
+          Get-ChildItem dist
+
+      - name: Upload Windows EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomePod-Bridge-Windows-x64
+          path: dist/*.exe
+          if-no-files-found: error
